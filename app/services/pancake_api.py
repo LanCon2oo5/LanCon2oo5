@@ -1,0 +1,67 @@
+from dataclasses import dataclass
+import time
+from typing import Any
+import httpx
+
+class PancakeApiError(Exception):
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message); self.status_code = status_code
+
+@dataclass(frozen=True)
+class PancakePage:
+    page_id: str
+    name: str
+    raw: dict[str, Any]
+
+class PancakeApiAdapter:
+    BASE_URL = "https://pages.fm/api/v1"
+    def __init__(self, access_token: str, timeout: float = 15.0, client: httpx.Client | None = None):
+        self.access_token = access_token.strip(); self.timeout = timeout; self._client = client
+    def _request(self, path: str) -> Any:
+        if not self.access_token: raise PancakeApiError("Vui lòng nhập Public API Access Token.")
+        owns = self._client is None; client = self._client or httpx.Client(timeout=self.timeout)
+        try: response = client.get(f"{self.BASE_URL}{path}", params={"access_token": self.access_token})
+        except httpx.RequestError as exc: raise PancakeApiError("Không thể kết nối Pancake. Hãy kiểm tra mạng và thử lại.") from exc
+        finally:
+            if owns: client.close()
+        messages = {401:"Token không hợp lệ hoặc đã hết hạn (401).",403:"Token không có quyền truy cập (403).",429:"Pancake đang giới hạn số lần gọi API (429). Vui lòng thử lại sau."}
+        if response.status_code in messages: raise PancakeApiError(messages[response.status_code], response.status_code)
+        if response.is_error: raise PancakeApiError(f"Pancake trả về lỗi HTTP {response.status_code}.", response.status_code)
+        try: return response.json()
+        except ValueError as exc: raise PancakeApiError("Pancake trả về dữ liệu không hợp lệ.") from exc
+    def list_pages(self) -> list[PancakePage]:
+        payload = self._request("/pages"); rows = payload.get("data", payload) if isinstance(payload, dict) else payload
+        if isinstance(rows, dict): rows = rows.get("pages", [])
+        if not isinstance(rows, list): raise PancakeApiError("Dữ liệu danh sách Fanpage không đúng định dạng.")
+        return [PancakePage(str(row["id"]), str(row.get("name") or row.get("title") or row["id"]), row) for row in rows if isinstance(row, dict) and row.get("id") is not None]
+    def check_connection(self) -> bool: self.list_pages(); return True
+
+class PancakeApiClient:
+    """Page-scoped public API client. Secrets are accepted only in memory."""
+    BASE_URL = "https://pages.fm/api/public_api/v2"
+    def __init__(self, page_id: str, page_access_token: str, timeout: float = 15.0, client=None):
+        self.page_id = str(page_id); self.token = page_access_token.strip(); self.timeout = timeout; self._client = client
+    def request(self, path: str, params=None):
+        if not self.token: raise PancakeApiError("Chưa cấu hình Page Access Token.")
+        owns=self._client is None; client=self._client or httpx.Client(timeout=self.timeout)
+        query=dict(params or {}); query["page_access_token"] = self.token
+        try: response=client.get(f"{self.BASE_URL}/pages/{self.page_id}/{path.lstrip('/')}", params=query)
+        except httpx.RequestError as exc: raise PancakeApiError("Không thể kết nối Pancake. Hãy kiểm tra mạng và thử lại.") from exc
+        finally:
+            if owns: client.close()
+        messages={401:"Page Token không hợp lệ hoặc đã hết hạn (401).",403:"Page Token không có quyền truy cập Fanpage này (403).",429:"Pancake đang giới hạn số lần gọi API (429). Vui lòng thử lại sau."}
+        if response.status_code in messages: raise PancakeApiError(messages[response.status_code], response.status_code)
+        if response.is_error: raise PancakeApiError(f"Pancake trả về lỗi HTTP {response.status_code}.", response.status_code)
+        try: return response.json()
+        except ValueError as exc: raise PancakeApiError("Pancake trả về dữ liệu không hợp lệ.") from exc
+    def check_connection(self): self.request("conversations", {"page_size": 1}); return True
+    def list_conversations(self, last_conversation_id=None):
+        params={"page_size":60}
+        if last_conversation_id: params["last_conversation_id"]=last_conversation_id
+        return self.request("conversations", params)
+    def list_messages(self, conversation_id): return self.request(f"conversations/{conversation_id}/messages")
+    def list_tags(self): return self.request("tags")
+
+ConversationService = PancakeApiClient
+MessageService = PancakeApiClient
+TagService = PancakeApiClient
