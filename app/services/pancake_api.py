@@ -62,6 +62,28 @@ class PancakeApiClient:
     def list_messages(self, conversation_id): return self.request(f"conversations/{conversation_id}/messages")
     def list_tags(self): return self.request("tags")
 
+class ConversationSyncService:
+    PAGE_SIZE = 60
+    def __init__(self, api: PancakeApiClient, min_interval=0.21): self.api=api; self.min_interval=min_interval; self._last_call=0.0
+    def sync(self, cancel=None, start_cursor=None, max_pages=100):
+        cursor=start_cursor; seen=set(); output=[]
+        for _ in range(max_pages):
+            if cancel and cancel(): break
+            if cursor in seen: break
+            seen.add(cursor)
+            delay=self.min_interval-(time.monotonic()-self._last_call)
+            if delay>0: time.sleep(delay)
+            payload=self.api.list_conversations(cursor); self._last_call=time.monotonic()
+            rows=payload.get("data", payload) if isinstance(payload,dict) else payload
+            if isinstance(rows,dict): rows=rows.get("conversations", rows.get("data", []))
+            if not isinstance(rows,list) or not rows: break
+            unique={str(x.get("id")):x for x in rows if isinstance(x,dict) and x.get("id") is not None}
+            output.extend(unique[k] for k in unique if k not in {str(x.get('id')) for x in output})
+            next_cursor=payload.get("last_conversation_id") if isinstance(payload,dict) else None
+            if not next_cursor or next_cursor==cursor or len(rows)<self.PAGE_SIZE: break
+            cursor=str(next_cursor)
+        return output, cursor
+
 ConversationService = PancakeApiClient
 MessageService = PancakeApiClient
 TagService = PancakeApiClient

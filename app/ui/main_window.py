@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import keyring
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import (QFrame, QLabel, QListWidget, QMainWindow, QStackedWidget, QStatusBar, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QMessageBox)
-from app.services.pancake_api import PancakeApiAdapter, PancakeApiError
+from PySide6.QtWidgets import (QFrame, QLabel, QListWidget, QMainWindow, QStackedWidget, QStatusBar, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QMessageBox, QSplitter)
+from app.services.pancake_api import PancakeApiAdapter, PancakeApiError, ConversationSyncService
 from app.services.pancake_api import PancakeApiClient
 from app.services.token_store import save_page_token, delete_page_token, get_page_token
 from app.services.token_metadata import estimated_expiry, expiry_info
@@ -16,6 +16,14 @@ class ApiWorker(QThread):
         try:
             api=PancakeApiAdapter(self.token); self.done.emit(api.list_pages() if self.pages else api.check_connection(), None)
         except PancakeApiError as exc: self.done.emit(None, str(exc))
+
+class ConversationWorker(QThread):
+    done=Signal(object,object)
+    def __init__(self,page_id,token): super().__init__(); self.page_id=page_id; self.token=token; self.cancelled=False
+    def cancel(self): self.cancelled=True
+    def run(self):
+        try: self.done.emit(ConversationSyncService(PancakeApiClient(self.page_id,self.token)).sync(lambda:self.cancelled),None)
+        except PancakeApiError as exc: self.done.emit(None,str(exc))
 
 
 class MainWindow(QMainWindow):
@@ -58,6 +66,12 @@ class MainWindow(QMainWindow):
             card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card); box.addWidget(QLabel("Public API Access Token (User Access Token)")); self.token_input=QLineEdit(); self.token_input.setEchoMode(QLineEdit.Password); self.token_input.setPlaceholderText("Dán token Pancake tại đây"); box.addWidget(self.token_input); row=QHBoxLayout(); self.check_btn=QPushButton("Kiểm tra kết nối"); self.save_btn=QPushButton("Lưu token"); self.delete_btn=QPushButton("Xóa token"); [row.addWidget(b) for b in (self.check_btn,self.save_btn,self.delete_btn)]; box.addLayout(row); self.account_status=QLabel("Chưa kết nối"); box.addWidget(self.account_status); layout.addWidget(card); self.check_btn.clicked.connect(self.check_connection); self.save_btn.clicked.connect(self.save_token); self.delete_btn.clicked.connect(self.delete_token)
         elif name == "Fanpage":
             card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card); self.refresh_btn=QPushButton("Làm mới danh sách"); self.page_list=QListWidget(); self.page_token=QLineEdit(); self.page_token.setEchoMode(QLineEdit.Password); self.page_token.setPlaceholderText("Page Access Token của Fanpage được chọn"); self.page_save=QPushButton("Lưu Page Token"); self.page_delete=QPushButton("Xóa Page Token"); self.page_check=QPushButton("Kiểm tra kết nối"); self.sync_status=QLabel("Chưa đồng bộ"); box.addWidget(self.refresh_btn); box.addWidget(self.page_list); box.addWidget(self.page_token); row=QHBoxLayout(); [row.addWidget(b) for b in (self.page_save,self.page_delete,self.page_check)]; box.addLayout(row); box.addWidget(self.sync_status); layout.addWidget(card); self.refresh_btn.clicked.connect(self.refresh_pages); self.page_list.currentRowChanged.connect(self.page_selected); self.page_save.clicked.connect(self.save_page); self.page_delete.clicked.connect(self.delete_page); self.page_check.clicked.connect(self.check_page)
+        elif name == "Hội thoại":
+            card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card)
+            row=QHBoxLayout(); self.conversation_page=QLineEdit(); self.conversation_page.setPlaceholderText("Page ID"); self.conversation_token=QLineEdit(); self.conversation_token.setEchoMode(QLineEdit.Password); self.conversation_token.setPlaceholderText("Page Access Token"); self.sync_conversations_btn=QPushButton("Đồng bộ"); self.stop_conversations_btn=QPushButton("Dừng"); [row.addWidget(x) for x in (self.conversation_page,self.conversation_token,self.sync_conversations_btn,self.stop_conversations_btn)]; box.addLayout(row)
+            self.conversation_status=QLabel("Chưa đồng bộ"); box.addWidget(self.conversation_status)
+            split=QSplitter(); self.conversation_pages=QListWidget(); self.conversation_pages.addItem("Fanpage đang chọn"); self.conversation_list=QListWidget(); self.conversation_detail=QLabel("Chọn một hội thoại để xem chi tiết.\n\nĐồng bộ message chưa được bật: tài liệu Public API hiện chưa xác nhận chính xác endpoint v1 và tham số current_count."); self.conversation_detail.setWordWrap(True); self.conversation_detail.setObjectName("muted"); split.addWidget(self.conversation_pages); split.addWidget(self.conversation_list); split.addWidget(self.conversation_detail); split.setSizes([180,420,360]); box.addWidget(split); layout.addWidget(card)
+            self.conversation_list.currentRowChanged.connect(self.show_conversation_detail); self.sync_conversations_btn.clicked.connect(self.sync_conversations); self.stop_conversations_btn.clicked.connect(self.stop_conversations)
         elif name == "Tổng quan":
             sub = QLabel("Theo dõi hoạt động của Pancake Desktop Toolkit"); sub.setObjectName("muted"); layout.addWidget(sub)
             row = QHBoxLayout()
@@ -83,6 +97,21 @@ class MainWindow(QMainWindow):
         else: self.account_status.setText("Kết nối thành công")
     def selected_page_id(self):
         item=self.page_list.currentItem(); return item.text().rsplit("Page ID: ",1)[-1] if item and "Page ID: " in item.text() else None
+    def sync_conversations(self):
+        pid=self.conversation_page.text().strip(); token=self.conversation_token.text().strip()
+        if not pid or not token: self.conversation_status.setText("Nhập Page ID và Page Token để đồng bộ."); return
+        self.conversation_status.setText("Đang đồng bộ tối đa 60 hội thoại/lượt..."); self.conversation_worker=ConversationWorker(pid,token); self.conversation_worker.done.connect(self.conversations_done); self.conversation_worker.start()
+    def stop_conversations(self):
+        if getattr(self,'conversation_worker',None): self.conversation_worker.cancel(); self.conversation_status.setText("Đã yêu cầu dừng đồng bộ")
+    def conversations_done(self,result,error):
+        if error: self.conversation_status.setText(error); return
+        rows,cursor=result; self.conversation_list.clear(); [self.conversation_list.addItem(f"{r.get('customer_name') or 'Khách hàng'} — {r.get('last_message') or 'Chưa có tin nhắn'}") for r in rows]
+        if self.database:
+            self.database.cache_conversations(self.conversation_page.text().strip(), rows, datetime.now(timezone.utc).isoformat())
+        self.conversation_status.setText(f"Đã tải {len(rows)} hội thoại; cursor: {cursor or 'hết dữ liệu'}")
+    def show_conversation_detail(self, _):
+        item=self.conversation_list.currentItem()
+        if item: self.conversation_detail.setText(item.text()+"\n\nMessage detail: Chưa hỗ trợ trong Giai đoạn 4A vì endpoint v1/current_count chưa được xác minh từ tài liệu chính thức.")
     def page_selected(self, _):
         pid=self.selected_page_id(); self.page_token.setText(get_page_token(pid) or "" if pid else "")
     def save_page(self):
