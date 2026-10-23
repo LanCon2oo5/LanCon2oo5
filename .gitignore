@@ -3,10 +3,12 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+release/
 *.log
 .env
 .env.*
 *.sqlite3
 runtime-data/
+.test-tmp/
 token*
 *secret*
