@@ -129,6 +129,9 @@ class MainWindow(QMainWindow):
             f"categorized child keys: {', '.join(diagnostics.categorized_keys) or '-'}",
             f"child types/sizes: {', '.join(diagnostics.categorized_summary) or '-'}",
             f"collection candidates: {', '.join(x for x in diagnostics.collection_candidates if x) or '-'}",
+            f"activated item type: {diagnostics.activated_item_type}",
+            f"activated item keys: {', '.join(diagnostics.activated_item_keys) or '-'}",
+            f"activated field types: {', '.join(diagnostics.activated_field_types) or '-'}",
             *( [f"Parser: {parser_error}"] if parser_error else [] ),
         ))
     def selected_page_id(self):

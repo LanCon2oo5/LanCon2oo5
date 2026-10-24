@@ -47,6 +47,17 @@ def test_categorized_structure_is_summarized_without_parsing_guesswork():
     assert "facebook: list/1" in diagnostics.categorized_summary
     assert "hidden" not in str(diagnostics)
 
+def test_activated_item_shape_is_summarized_without_values():
+    payload = {"categorized": {"activated": [{"id": "hidden", "name": "Hidden Name", "enabled": True}], "activated_page_ids": ["hidden"]}, "success": True}
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload)))
+    with pytest.raises(PancakeApiError) as caught:
+        PancakeApiAdapter("secret", client=client).list_pages()
+    diagnostics = caught.value.diagnostics
+    assert diagnostics.activated_item_type == "dict"
+    assert diagnostics.activated_item_keys == ("enabled", "id", "name")
+    assert "id: str" in diagnostics.activated_field_types
+    assert "Hidden Name" not in str(diagnostics)
+
 @pytest.mark.parametrize("status", [401, 403, 429])
 def test_api_errors_are_translated(status):
     client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(status)))

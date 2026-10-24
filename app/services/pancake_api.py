@@ -32,6 +32,9 @@ class PageListDiagnostics:
     categorized_keys: tuple[str, ...] = ()
     categorized_summary: tuple[str, ...] = ()
     collection_candidates: tuple[str, ...] = ()
+    activated_item_type: str = "absent"
+    activated_item_keys: tuple[str, ...] = ()
+    activated_field_types: tuple[str, ...] = ()
 
 class PancakeApiAdapter:
     BASE_URL = "https://pages.fm/api/v1"
@@ -98,7 +101,11 @@ class PancakeApiAdapter:
                 summary.append(f"{key}: {kind}/{count}")
                 if isinstance(value, (list, dict)):
                     candidates.append(str(key))
-            return PageListDiagnostics(diagnostics.http_status, diagnostics.api_success, diagnostics.response_type, diagnostics.top_level_fields, diagnostics.parsed_count, diagnostics.content_type, diagnostics.json_type, diagnostics.success, diagnostics.error_code, diagnostics.error_message, diagnostics.list_location, "dict", tuple(keys), tuple(sorted(summary)), tuple(sorted(candidates)))
+            activated = categorized.get("activated")
+            item_type = type(activated[0]).__name__ if isinstance(activated, list) and activated else ("empty" if isinstance(activated, list) else "absent")
+            item_keys = tuple(sorted(str(k) for k in activated[0].keys())) if isinstance(activated, list) and activated and isinstance(activated[0], dict) else ()
+            field_types = tuple(sorted(f"{k}: {type(v).__name__}" for k, v in activated[0].items())) if isinstance(activated, list) and activated and isinstance(activated[0], dict) else ()
+            return PageListDiagnostics(diagnostics.http_status, diagnostics.api_success, diagnostics.response_type, diagnostics.top_level_fields, diagnostics.parsed_count, diagnostics.content_type, diagnostics.json_type, diagnostics.success, diagnostics.error_code, diagnostics.error_message, diagnostics.list_location, "dict", tuple(keys), tuple(sorted(summary)), tuple(sorted(candidates)), item_type, item_keys, field_types)
         return PageListDiagnostics(diagnostics.http_status, diagnostics.api_success, diagnostics.response_type, diagnostics.top_level_fields, diagnostics.parsed_count, diagnostics.content_type, diagnostics.json_type, diagnostics.success, diagnostics.error_code, diagnostics.error_message, diagnostics.list_location, type(categorized).__name__, (), (), ("categorized" if isinstance(categorized, (list, tuple)) else "",))
 
     def list_pages_with_diagnostics(self) -> tuple[list[PancakePage], PageListDiagnostics]:
