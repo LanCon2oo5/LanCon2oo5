@@ -169,13 +169,21 @@ class MainWindow(QMainWindow):
         if not self.token_input.text().strip(): QMessageBox.warning(self,"Thiếu User Token","Nhập User Access Token ở trang Tài khoản Pancake trước."); return
         answer=QMessageBox.question(self,"Cấp Page Token mới","Pancake sẽ vô hiệu hóa Page Token cũ nếu có. Bạn có chắc muốn tiếp tục?",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer != QMessageBox.Yes: self.sync_status.setText("Đã hủy cấp Page Token"); return
+        api_adapter = PancakeApiAdapter(self.token_input.text())
         try:
-            token=PancakeApiAdapter(self.token_input.text()).generate_page_access_token(pid)
+            token=api_adapter.generate_page_access_token(pid)
             PancakeApiClient(pid,token).check_connection(); save_page_token(pid,token)
             if self.database: self.database.update_page_token_metadata(pid,datetime.now(timezone.utc).isoformat(),None,False,"Đã kết nối")
             self.page_token.setText(token); self.sync_status.setText("Đã kết nối bằng Page Token mới; thời hạn: không tự hết hạn")
-        except PancakeApiError as exc: self.sync_status.setText(str(exc))
+        except PancakeApiError as exc:
+            self.sync_status.setText(str(exc))
+            diagnostics=getattr(exc,"diagnostics",None) or api_adapter.last_token_generation_diagnostics
+            if diagnostics: self.page_diagnostics.setPlainText(self._token_diagnostic_text(diagnostics, uncertain=True))
         except Exception as exc: self.sync_status.setText(str(exc))
+    def _token_diagnostic_text(self, diagnostics, uncertain=False):
+        success = "chưa có" if diagnostics.success is None else str(diagnostics.success)
+        state = "Chưa xác định — không tạo lại token" if uncertain or diagnostics.request_state != "HTTP response received" else diagnostics.request_state
+        return "\n".join(("Chẩn đoán cấp Page Token", f"Trạng thái request: {state}", f"HTTP Status: {diagnostics.http_status if diagnostics.http_status is not None else '-'}", f"Content-Type: {diagnostics.content_type or '-'}", f"JSON Type: {diagnostics.json_type}", f"Top-level Fields: {', '.join(diagnostics.top_level_fields) or '-'}", f"API Success: {success}", f"Error Code: {diagnostics.error_code or '-'}", f"Error Message: {diagnostics.error_message or '-'}", f"Token Field Location: {diagnostics.token_field_location}", f"Token Present: {diagnostics.token_present}"))
     def delete_page(self):
         pid=self.selected_page_id()
         if pid: delete_page_token(pid); self.page_token.clear(); self.database.set_page_token_status(pid,"Chưa cấu hình") if self.database else None; self.sync_status.setText("Đã xóa Page Token")

@@ -40,10 +40,24 @@ class PageListDiagnostics:
     activated_field_types: tuple[str, ...] = ()
     skipped_count: int = 0
 
+
+@dataclass(frozen=True)
+class TokenGenerationDiagnostics:
+    http_status: int | None
+    content_type: str = ""
+    json_type: str = "unknown"
+    top_level_fields: tuple[str, ...] = ()
+    success: object = None
+    error_code: object = None
+    error_message: str = ""
+    token_field_location: str = "not found"
+    token_present: bool = False
+    request_state: str = "unknown"
+
 class PancakeApiAdapter:
     BASE_URL = "https://pages.fm/api/v1"
     def __init__(self, access_token: str, timeout: float = 15.0, client: httpx.Client | None = None):
-        self.access_token = access_token.strip(); self.timeout = timeout; self._client = client; self.last_page_diagnostics = None
+        self.access_token = access_token.strip(); self.timeout = timeout; self._client = client; self.last_page_diagnostics = None; self.last_token_generation_diagnostics = None
     def _request(self, path: str) -> Any:
         if not self.access_token: raise PancakeApiError("Vui lòng nhập Public API Access Token.")
         owns = self._client is None; client = self._client or httpx.Client(timeout=self.timeout)
@@ -150,24 +164,35 @@ class PancakeApiAdapter:
                 params={"access_token": self.access_token},
             )
         except httpx.RequestError as exc:
-            raise PancakeApiError("Không thể kết nối Pancake. Hãy kiểm tra mạng và thử lại.") from exc
+            self.last_token_generation_diagnostics = TokenGenerationDiagnostics(None, request_state="request sent or outcome unknown; no HTTP response")
+            raise PancakeApiError("Không thể xác định kết quả cấp Page Token; không tạo lại token.", None, self.last_token_generation_diagnostics) from exc
         finally:
             if owns:
                 client.close()
-        messages = {401: "Token không hợp lệ hoặc đã hết hạn (401).", 403: "Bạn không có quyền quản trị Fanpage này (403).", 429: "Pancake đang giới hạn số lần gọi API (429). Vui lòng thử lại sau."}
-        if response.status_code in messages:
-            raise PancakeApiError(messages[response.status_code], response.status_code)
-        if response.is_error:
-            raise PancakeApiError(f"Pancake trả về lỗi HTTP {response.status_code}.", response.status_code)
         try:
             payload = response.json()
         except ValueError as exc:
-            raise PancakeApiError("Pancake trả về dữ liệu không hợp lệ.") from exc
-        token = payload.get("page_access_token") if isinstance(payload, dict) else None
-        if not token and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
-            token = payload["data"].get("page_access_token")
+            self.last_token_generation_diagnostics = TokenGenerationDiagnostics(response.status_code, response.headers.get("content-type", ""), request_state="HTTP response received; body is not JSON")
+            raise PancakeApiError("Pancake trả về dữ liệu không phải JSON.", response.status_code, self.last_token_generation_diagnostics) from exc
+        top = tuple(sorted(payload.keys())) if isinstance(payload, dict) else ()
+        success = payload.get("success") if isinstance(payload, dict) else None
+        err = payload.get("error") if isinstance(payload, dict) else None
+        error_code = err.get("code") if isinstance(err, dict) else None
+        error_message = str(err.get("message", "") if isinstance(err, dict) else (err or ""))
+        error_message = re.sub(r"https?://\S+|access_token=[^&\s]+|page_access_token=[^&\s]+", "[redacted]", error_message)[:300]
+        token = None; location = "not found"
+        if isinstance(payload, dict) and isinstance(payload.get("page_access_token"), str):
+            token = payload["page_access_token"]; location = "top-level.page_access_token"
+        elif isinstance(payload, dict) and isinstance(payload.get("data"), dict) and isinstance(payload["data"].get("page_access_token"), str):
+            token = payload["data"]["page_access_token"]; location = "data.page_access_token"
+        self.last_token_generation_diagnostics = TokenGenerationDiagnostics(response.status_code, response.headers.get("content-type", ""), type(payload).__name__, top, success, error_code, error_message, location, bool(token and token.strip()), "HTTP response received")
+        messages = {401: "Token không hợp lệ hoặc đã hết hạn (401).", 403: "Bạn không có quyền quản trị Fanpage này (403).", 429: "Pancake đang giới hạn số lần gọi API (429). Vui lòng thử lại sau."}
+        if response.status_code in messages:
+            raise PancakeApiError(messages[response.status_code], response.status_code, self.last_token_generation_diagnostics)
+        if response.is_error or success is False:
+            raise PancakeApiError(error_message or f"Pancake trả về lỗi HTTP {response.status_code}.", response.status_code, self.last_token_generation_diagnostics)
         if not isinstance(token, str) or not token.strip():
-            raise PancakeApiError("Pancake không trả về Page Access Token.")
+            raise PancakeApiError("Pancake không trả về Page Access Token; không tạo lại token.", response.status_code, self.last_token_generation_diagnostics)
         return token.strip()
 
     def check_connection(self) -> bool: self.list_pages(); return True
