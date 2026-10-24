@@ -111,7 +111,8 @@ class MainWindow(QMainWindow):
         success = "chưa có" if diagnostics.success is None else str(diagnostics.success)
         error = f" • error: {diagnostics.error_code or '-'} {diagnostics.error_message}" if diagnostics.error_code or diagnostics.error_message else ""
         parser = f" • parser: {parser_error}" if parser_error else ""
-        return f"Chẩn đoán API: HTTP {diagnostics.http_status} • Content-Type: {diagnostics.content_type or '-'} • JSON: {diagnostics.json_type} • fields: {', '.join(diagnostics.top_level_fields) or '(không có)'} • success: {success} • danh sách: {diagnostics.list_location} • parsed: {diagnostics.parsed_count} • SQLite: {sqlite_count if sqlite_count is not None else '-'} • UI: {ui_count if ui_count is not None else '-'}{error}{parser}"
+        categorized = f" • categorized: {diagnostics.categorized_type}; keys: {', '.join(diagnostics.categorized_keys) or '-'}; children: {', '.join(diagnostics.categorized_summary) or '-'}; collections: {', '.join(x for x in diagnostics.collection_candidates if x) or '-'}" if diagnostics.categorized_type != "absent" else ""
+        return f"Chẩn đoán API: HTTP {diagnostics.http_status} • Content-Type: {diagnostics.content_type or '-'} • JSON: {diagnostics.json_type} • fields: {', '.join(diagnostics.top_level_fields) or '(không có)'} • success: {success} • danh sách: {diagnostics.list_location} • parsed: {diagnostics.parsed_count} • SQLite: {sqlite_count if sqlite_count is not None else '-'} • UI: {ui_count if ui_count is not None else '-'}{categorized}{error}{parser}"
     def selected_page_id(self):
         item=self.page_list.currentItem(); return item.text().split("Page ID: ",1)[-1].split(" — ",1)[0] if item and "Page ID: " in item.text() else None
     def sync_conversations(self):

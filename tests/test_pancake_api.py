@@ -35,6 +35,18 @@ def test_diagnostics_survive_parser_failure_and_redact_token():
     assert error.diagnostics.success is False
     assert "top-secret" not in error.diagnostics.error_message
 
+def test_categorized_structure_is_summarized_without_parsing_guesswork():
+    payload = {"categorized": {"facebook": [{"id": "hidden"}], "zalo": [], "meta": {"count": 1}}, "success": True}
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload)))
+    with pytest.raises(PancakeApiError) as caught:
+        PancakeApiAdapter("secret", client=client).list_pages()
+    diagnostics = caught.value.diagnostics
+    assert diagnostics.categorized_type == "dict"
+    assert diagnostics.categorized_keys == ("facebook", "meta", "zalo")
+    assert "facebook" in diagnostics.collection_candidates
+    assert "facebook: list/1" in diagnostics.categorized_summary
+    assert "hidden" not in str(diagnostics)
+
 @pytest.mark.parametrize("status", [401, 403, 429])
 def test_api_errors_are_translated(status):
     client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(status)))

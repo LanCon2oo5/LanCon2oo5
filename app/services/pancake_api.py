@@ -28,6 +28,10 @@ class PageListDiagnostics:
     error_code: object = None
     error_message: str = ""
     list_location: str = "not found"
+    categorized_type: str = "absent"
+    categorized_keys: tuple[str, ...] = ()
+    categorized_summary: tuple[str, ...] = ()
+    collection_candidates: tuple[str, ...] = ()
 
 class PancakeApiAdapter:
     BASE_URL = "https://pages.fm/api/v1"
@@ -50,6 +54,7 @@ class PancakeApiAdapter:
         err_message = err.get("message") if isinstance(err, dict) else (str(err) if err else "")
         err_message = re.sub(r"https?://\S+|access_token=[^&\s]+|page_access_token=[^&\s]+", "[redacted]", str(err_message))[:300]
         self.last_page_diagnostics = PageListDiagnostics(response.status_code, response.is_success and success is not False, type(payload).__name__, top, 0, response.headers.get("content-type", ""), type(payload).__name__, success, err_code, err_message)
+        self.last_page_diagnostics = self._with_categorized_diagnostics(self.last_page_diagnostics, payload)
         messages = {401:"Token không hợp lệ hoặc đã hết hạn (401).",403:"Không có quyền truy cập Fanpage (403).",429:"Pancake đang giới hạn số lần gọi API (429)."}
         if response.status_code in messages: raise PancakeApiError(messages[response.status_code], response.status_code, self.last_page_diagnostics)
         if response.is_error or success is False: raise PancakeApiError(err_message or f"Pancake trả về lỗi HTTP {response.status_code}.", response.status_code, self.last_page_diagnostics)
@@ -76,8 +81,25 @@ class PancakeApiAdapter:
                 continue
             pages.append(PancakePage(str(page_id), str(row.get("name") or row.get("title") or page_id), row))
         old = self.last_page_diagnostics
-        self.last_page_diagnostics = PageListDiagnostics(http_status, True, type(payload).__name__, top_fields, len(pages), old.content_type if old else "", old.json_type if old else type(payload).__name__, old.success if old else None, old.error_code if old else None, old.error_message if old else "", "data" if isinstance(payload, dict) and "data" in payload else "top-level")
+        self.last_page_diagnostics = PageListDiagnostics(http_status, True, type(payload).__name__, top_fields, len(pages), old.content_type if old else "", old.json_type if old else type(payload).__name__, old.success if old else None, old.error_code if old else None, old.error_message if old else "", "data" if isinstance(payload, dict) and "data" in payload else "top-level", old.categorized_type if old else "absent", old.categorized_keys if old else (), old.categorized_summary if old else (), old.collection_candidates if old else ())
         return pages
+
+    def _with_categorized_diagnostics(self, diagnostics, payload):
+        categorized = payload.get("categorized") if isinstance(payload, dict) else None
+        if categorized is None:
+            return diagnostics
+        if isinstance(categorized, dict):
+            keys = tuple(sorted(str(key) for key in categorized.keys()))
+            summary = []
+            candidates = []
+            for key, value in categorized.items():
+                kind = type(value).__name__
+                count = len(value) if isinstance(value, (dict, list, tuple, set)) else "-"
+                summary.append(f"{key}: {kind}/{count}")
+                if isinstance(value, (list, dict)):
+                    candidates.append(str(key))
+            return PageListDiagnostics(diagnostics.http_status, diagnostics.api_success, diagnostics.response_type, diagnostics.top_level_fields, diagnostics.parsed_count, diagnostics.content_type, diagnostics.json_type, diagnostics.success, diagnostics.error_code, diagnostics.error_message, diagnostics.list_location, "dict", tuple(keys), tuple(sorted(summary)), tuple(sorted(candidates)))
+        return PageListDiagnostics(diagnostics.http_status, diagnostics.api_success, diagnostics.response_type, diagnostics.top_level_fields, diagnostics.parsed_count, diagnostics.content_type, diagnostics.json_type, diagnostics.success, diagnostics.error_code, diagnostics.error_message, diagnostics.list_location, type(categorized).__name__, (), (), ("categorized" if isinstance(categorized, (list, tuple)) else "",))
 
     def list_pages_with_diagnostics(self) -> tuple[list[PancakePage], PageListDiagnostics]:
         pages = self.list_pages()
