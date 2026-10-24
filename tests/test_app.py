@@ -31,9 +31,26 @@ def test_parser_error_diagnostics_reach_fanpage_ui(tmp_path, monkeypatch):
     diagnostics = PageListDiagnostics(200, True, "dict", ("success", "message"), 0, "application/json", "dict", True, None, "", "not found")
     error = PancakeApiError("Dữ liệu danh sách Fanpage thiếu trường danh sách.", 200, diagnostics)
     window.worker_done(None, error)
-    text = window.page_diagnostics.text()
-    assert "HTTP 200" in text
+    text = window.page_diagnostics.toPlainText()
+    assert "HTTP Status: 200" in text
     assert "Content-Type: application/json" in text
-    assert "fields: success, message" in text
-    assert "parser:" in text
+    assert "Top-level Fields: success, message" in text
+    assert "Parser:" in text
+    db.close()
+
+
+def test_diagnostics_panel_is_multiline_copyable_and_sidebar_stable(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app, db, window = create_app()
+    assert window.page_diagnostics.isReadOnly()
+    assert window.page_diagnostics.lineWrapMode().name != "NoWrap"
+    assert window.nav.width() == 240
+    window.resize(960, 600)
+    assert window.nav.width() == 240
+    window.page_diagnostics.setPlainText("HTTP Status: 200\nContent-Type: application/json\nTop-level Fields: categorized, success\nToken: [not included]")
+    window.copy_diagnostics_btn.click()
+    copied = app.clipboard().text()
+    assert "HTTP Status: 200" in copied
+    assert "Top-level Fields: categorized, success" in copied
+    assert "access_token" not in copied.lower()
     db.close()

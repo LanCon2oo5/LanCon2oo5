@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import keyring
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import (QFrame, QLabel, QListWidget, QMainWindow, QStackedWidget, QStatusBar, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QMessageBox, QSplitter)
+from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtWidgets import (QApplication, QFrame, QLabel, QListWidget, QMainWindow, QStackedWidget, QStatusBar, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QMessageBox, QSplitter, QPlainTextEdit)
 from app.services.pancake_api import PancakeApiAdapter, PancakeApiError, ConversationSyncService
 from app.services.pancake_api import PancakeApiClient
 from app.services.token_store import save_page_token, delete_page_token, get_page_token
@@ -44,6 +44,8 @@ class MainWindow(QMainWindow):
         QLabel#metric { font-size: 28px; font-weight: 700; color: #2563eb; }
         """)
         self.nav = QListWidget()
+        self.nav.setFixedWidth(240)
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.pages = QStackedWidget()
         items = ["Tổng quan", "Tài khoản Pancake", "Fanpage", "Hội thoại", "Tự động gắn thẻ", "Trả lời tự động", "Nhật ký hoạt động", "Cài đặt"]
         self.nav.addItems(items)
@@ -65,7 +67,7 @@ class MainWindow(QMainWindow):
         if name == "Tài khoản Pancake":
             card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card); box.addWidget(QLabel("Public API Access Token (User Access Token)")); self.token_input=QLineEdit(); self.token_input.setEchoMode(QLineEdit.Password); self.token_input.setPlaceholderText("Dán token Pancake tại đây"); box.addWidget(self.token_input); row=QHBoxLayout(); self.check_btn=QPushButton("Kiểm tra kết nối"); self.save_btn=QPushButton("Lưu token"); self.delete_btn=QPushButton("Xóa token"); [row.addWidget(b) for b in (self.check_btn,self.save_btn,self.delete_btn)]; box.addLayout(row); self.account_status=QLabel("Chưa kết nối"); box.addWidget(self.account_status); layout.addWidget(card); self.check_btn.clicked.connect(self.check_connection); self.save_btn.clicked.connect(self.save_token); self.delete_btn.clicked.connect(self.delete_token)
         elif name == "Fanpage":
-            card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card); self.refresh_btn=QPushButton("Làm mới danh sách"); self.page_list=QListWidget(); self.page_token=QLineEdit(); self.page_token.setEchoMode(QLineEdit.Password); self.page_token.setPlaceholderText("Page Access Token thủ công (tuỳ chọn)"); self.page_connect=QPushButton("Kết nối Fanpage"); self.page_save=QPushButton("Lưu Page Token"); self.page_delete=QPushButton("Ngắt kết nối"); self.page_check=QPushButton("Kiểm tra kết nối"); self.page_count=QLabel("Fanpage: 0"); self.page_diagnostics=QLabel("API: chưa đồng bộ"); self.sync_status=QLabel("Chưa đồng bộ"); box.addWidget(self.refresh_btn); box.addWidget(self.page_count); box.addWidget(self.page_list); box.addWidget(self.page_token); row=QHBoxLayout(); [row.addWidget(b) for b in (self.page_connect,self.page_save,self.page_delete,self.page_check)]; box.addLayout(row); box.addWidget(self.page_diagnostics); box.addWidget(self.sync_status); layout.addWidget(card); self.refresh_btn.clicked.connect(self.refresh_pages); self.page_list.currentRowChanged.connect(self.page_selected); self.page_connect.clicked.connect(self.connect_page); self.page_save.clicked.connect(self.save_page); self.page_delete.clicked.connect(self.delete_page); self.page_check.clicked.connect(self.check_page); self._set_page_actions_enabled(False)
+            card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card); self.refresh_btn=QPushButton("Làm mới danh sách"); self.page_list=QListWidget(); self.page_token=QLineEdit(); self.page_token.setEchoMode(QLineEdit.Password); self.page_token.setPlaceholderText("Page Access Token thủ công (tuỳ chọn)"); self.page_connect=QPushButton("Kết nối Fanpage"); self.page_save=QPushButton("Lưu Page Token"); self.page_delete=QPushButton("Ngắt kết nối"); self.page_check=QPushButton("Kiểm tra kết nối"); self.page_count=QLabel("Fanpage: 0"); self.page_diagnostics=QPlainTextEdit(); self.page_diagnostics.setReadOnly(True); self.page_diagnostics.setLineWrapMode(QPlainTextEdit.WidgetWidth); self.page_diagnostics.setMinimumHeight(190); self.copy_diagnostics_btn=QPushButton("Sao chép chẩn đoán"); self.sync_status=QLabel("Chưa đồng bộ"); box.addWidget(self.refresh_btn); box.addWidget(self.page_count); box.addWidget(self.page_list); box.addWidget(self.page_token); row=QHBoxLayout(); [row.addWidget(b) for b in (self.page_connect,self.page_save,self.page_delete,self.page_check)]; box.addLayout(row); diag_row=QHBoxLayout(); diag_row.addWidget(self.page_diagnostics,1); diag_row.addWidget(self.copy_diagnostics_btn,0); box.addLayout(diag_row); box.addWidget(self.sync_status); layout.addWidget(card); self.refresh_btn.clicked.connect(self.refresh_pages); self.page_list.currentRowChanged.connect(self.page_selected); self.page_connect.clicked.connect(self.connect_page); self.page_save.clicked.connect(self.save_page); self.page_delete.clicked.connect(self.delete_page); self.page_check.clicked.connect(self.check_page); self.copy_diagnostics_btn.clicked.connect(lambda: QApplication.clipboard().setText(self.page_diagnostics.toPlainText())); self._set_page_actions_enabled(False)
         elif name == "Hội thoại":
             card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card)
             row=QHBoxLayout(); self.conversation_page=QLineEdit(); self.conversation_page.setPlaceholderText("Page ID"); self.conversation_token=QLineEdit(); self.conversation_token.setEchoMode(QLineEdit.Password); self.conversation_token.setPlaceholderText("Page Access Token"); self.sync_conversations_btn=QPushButton("Đồng bộ"); self.stop_conversations_btn=QPushButton("Dừng"); [row.addWidget(x) for x in (self.conversation_page,self.conversation_token,self.sync_conversations_btn,self.stop_conversations_btn)]; box.addLayout(row)
@@ -88,15 +90,15 @@ class MainWindow(QMainWindow):
         if not token: QMessageBox.warning(self,"Thiếu token","Vui lòng nhập Public API Access Token."); return
         self.worker=ApiWorker(token,pages); self.worker.done.connect(self.worker_done); self.worker.start()
     def check_connection(self): self.account_status.setText("Đang kiểm tra..."); self.run_worker()
-    def refresh_pages(self): self.sync_status.setText("Đang gọi API..."); self.page_diagnostics.setText("Chẩn đoán API: đang thực hiện request GET /pages..."); self.run_worker(True)
+    def refresh_pages(self): self.sync_status.setText("Đang gọi API..."); self.page_diagnostics.setPlainText("Chẩn đoán API\nTrạng thái: đang thực hiện request GET /pages..."); self.run_worker(True)
     def _set_page_actions_enabled(self, enabled):
         for button in (self.page_connect,self.page_save,self.page_delete,self.page_check): button.setEnabled(enabled)
     def worker_done(self, result, error):
         if error:
             message=str(error); self.account_status.setText(message); self.sync_status.setText(message)
             diagnostics=getattr(error,"diagnostics",None)
-            if diagnostics: self.page_diagnostics.setText(self._diagnostic_text(diagnostics, sqlite_count=None, ui_count=self.page_list.count(), parser_error=message))
-            else: self.page_diagnostics.setText(f"Chẩn đoán API: request thất bại trước HTTP response • {message}")
+            if diagnostics: self.page_diagnostics.setPlainText(self._diagnostic_text(diagnostics, sqlite_count=None, ui_count=self.page_list.count(), parser_error=message))
+            else: self.page_diagnostics.setPlainText(f"Chẩn đoán API:\nTrạng thái: request thất bại trước HTTP response\nLỗi: {message}")
             return
         if isinstance(result,list):
             self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in result]; now=datetime.now(timezone.utc).isoformat(); self.sync_status.setText(f"Đã đồng bộ {len(result)} Fanpage lúc {now}");
@@ -105,14 +107,30 @@ class MainWindow(QMainWindow):
             pages, diagnostics = result; self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in pages]; now=datetime.now(timezone.utc).isoformat(); self.page_count.setText(f"Fanpage: {len(pages)}"); sqlite_count=None
             if self.database:
                 self.database.replace_pages([(p.page_id,p.name) for p in pages],now); sqlite_count=self.database.connection.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
-            self.page_diagnostics.setText(self._diagnostic_text(diagnostics, sqlite_count, len(pages))); self.sync_status.setText(f"Đã đồng bộ {len(pages)} Fanpage"); self._set_page_actions_enabled(False)
+            self.page_diagnostics.setPlainText(self._diagnostic_text(diagnostics, sqlite_count, len(pages))); self.sync_status.setText(f"Đã đồng bộ {len(pages)} Fanpage"); self._set_page_actions_enabled(False)
         else: self.account_status.setText("Kết nối thành công")
     def _diagnostic_text(self, diagnostics, sqlite_count=None, ui_count=None, parser_error=None):
         success = "chưa có" if diagnostics.success is None else str(diagnostics.success)
         error = f" • error: {diagnostics.error_code or '-'} {diagnostics.error_message}" if diagnostics.error_code or diagnostics.error_message else ""
         parser = f" • parser: {parser_error}" if parser_error else ""
         categorized = f" • categorized: {diagnostics.categorized_type}; keys: {', '.join(diagnostics.categorized_keys) or '-'}; children: {', '.join(diagnostics.categorized_summary) or '-'}; collections: {', '.join(x for x in diagnostics.collection_candidates if x) or '-'}" if diagnostics.categorized_type != "absent" else ""
-        return f"Chẩn đoán API: HTTP {diagnostics.http_status} • Content-Type: {diagnostics.content_type or '-'} • JSON: {diagnostics.json_type} • fields: {', '.join(diagnostics.top_level_fields) or '(không có)'} • success: {success} • danh sách: {diagnostics.list_location} • parsed: {diagnostics.parsed_count} • SQLite: {sqlite_count if sqlite_count is not None else '-'} • UI: {ui_count if ui_count is not None else '-'}{categorized}{error}{parser}"
+        return "\n".join((
+            "Chẩn đoán API",
+            f"HTTP Status: {diagnostics.http_status}",
+            f"Content-Type: {diagnostics.content_type or '-'}",
+            f"JSON Type: {diagnostics.json_type}",
+            f"Top-level Fields: {', '.join(diagnostics.top_level_fields) or '(không có)'}",
+            f"API Success: {success}{error}",
+            f"List Location: {diagnostics.list_location}",
+            f"Parsed Pages: {diagnostics.parsed_count}",
+            f"SQLite Pages: {sqlite_count if sqlite_count is not None else '-'}",
+            f"UI Pages: {ui_count if ui_count is not None else '-'}",
+            f"categorized type: {diagnostics.categorized_type}",
+            f"categorized child keys: {', '.join(diagnostics.categorized_keys) or '-'}",
+            f"child types/sizes: {', '.join(diagnostics.categorized_summary) or '-'}",
+            f"collection candidates: {', '.join(x for x in diagnostics.collection_candidates if x) or '-'}",
+            *( [f"Parser: {parser_error}"] if parser_error else [] ),
+        ))
     def selected_page_id(self):
         item=self.page_list.currentItem(); return item.text().split("Page ID: ",1)[-1].split(" — ",1)[0] if item and "Page ID: " in item.text() else None
     def sync_conversations(self):
