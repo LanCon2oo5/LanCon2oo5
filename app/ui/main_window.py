@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         if name == "Tài khoản Pancake":
             card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card); box.addWidget(QLabel("Public API Access Token (User Access Token)")); self.token_input=QLineEdit(); self.token_input.setEchoMode(QLineEdit.Password); self.token_input.setPlaceholderText("Dán token Pancake tại đây"); box.addWidget(self.token_input); row=QHBoxLayout(); self.check_btn=QPushButton("Kiểm tra kết nối"); self.save_btn=QPushButton("Lưu token"); self.delete_btn=QPushButton("Xóa token"); [row.addWidget(b) for b in (self.check_btn,self.save_btn,self.delete_btn)]; box.addLayout(row); self.account_status=QLabel("Chưa kết nối"); box.addWidget(self.account_status); layout.addWidget(card); self.check_btn.clicked.connect(self.check_connection); self.save_btn.clicked.connect(self.save_token); self.delete_btn.clicked.connect(self.delete_token)
         elif name == "Fanpage":
-            card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card); self.refresh_btn=QPushButton("Làm mới danh sách"); self.page_list=QListWidget(); self.page_token=QLineEdit(); self.page_token.setEchoMode(QLineEdit.Password); self.page_token.setPlaceholderText("Page Access Token của Fanpage được chọn"); self.page_save=QPushButton("Lưu Page Token"); self.page_delete=QPushButton("Xóa Page Token"); self.page_check=QPushButton("Kiểm tra kết nối"); self.sync_status=QLabel("Chưa đồng bộ"); box.addWidget(self.refresh_btn); box.addWidget(self.page_list); box.addWidget(self.page_token); row=QHBoxLayout(); [row.addWidget(b) for b in (self.page_save,self.page_delete,self.page_check)]; box.addLayout(row); box.addWidget(self.sync_status); layout.addWidget(card); self.refresh_btn.clicked.connect(self.refresh_pages); self.page_list.currentRowChanged.connect(self.page_selected); self.page_save.clicked.connect(self.save_page); self.page_delete.clicked.connect(self.delete_page); self.page_check.clicked.connect(self.check_page)
+            card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card); self.refresh_btn=QPushButton("Làm mới danh sách"); self.page_list=QListWidget(); self.page_token=QLineEdit(); self.page_token.setEchoMode(QLineEdit.Password); self.page_token.setPlaceholderText("Page Access Token thủ công (tuỳ chọn)"); self.page_connect=QPushButton("Kết nối Fanpage"); self.page_save=QPushButton("Lưu Page Token"); self.page_delete=QPushButton("Ngắt kết nối"); self.page_check=QPushButton("Kiểm tra kết nối"); self.sync_status=QLabel("Chưa đồng bộ"); box.addWidget(self.refresh_btn); box.addWidget(self.page_list); box.addWidget(self.page_token); row=QHBoxLayout(); [row.addWidget(b) for b in (self.page_connect,self.page_save,self.page_delete,self.page_check)]; box.addLayout(row); box.addWidget(self.sync_status); layout.addWidget(card); self.refresh_btn.clicked.connect(self.refresh_pages); self.page_list.currentRowChanged.connect(self.page_selected); self.page_connect.clicked.connect(self.connect_page); self.page_save.clicked.connect(self.save_page); self.page_delete.clicked.connect(self.delete_page); self.page_check.clicked.connect(self.check_page)
         elif name == "Hội thoại":
             card=QFrame(); card.setObjectName("card"); box=QVBoxLayout(card)
             row=QHBoxLayout(); self.conversation_page=QLineEdit(); self.conversation_page.setPlaceholderText("Page ID"); self.conversation_token=QLineEdit(); self.conversation_token.setEchoMode(QLineEdit.Password); self.conversation_token.setPlaceholderText("Page Access Token"); self.sync_conversations_btn=QPushButton("Đồng bộ"); self.stop_conversations_btn=QPushButton("Dừng"); [row.addWidget(x) for x in (self.conversation_page,self.conversation_token,self.sync_conversations_btn,self.stop_conversations_btn)]; box.addLayout(row)
@@ -92,11 +92,11 @@ class MainWindow(QMainWindow):
     def worker_done(self, result, error):
         if error: self.account_status.setText(error); self.sync_status.setText(error); return
         if isinstance(result,list):
-            self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id}") for p in result]; now=datetime.now(timezone.utc).isoformat(); self.sync_status.setText(f"Đã đồng bộ {len(result)} Fanpage lúc {now}");
+            self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in result]; now=datetime.now(timezone.utc).isoformat(); self.sync_status.setText(f"Đã đồng bộ {len(result)} Fanpage lúc {now}");
             if self.database: self.database.replace_pages([(p.page_id,p.name) for p in result],now)
         else: self.account_status.setText("Kết nối thành công")
     def selected_page_id(self):
-        item=self.page_list.currentItem(); return item.text().rsplit("Page ID: ",1)[-1] if item and "Page ID: " in item.text() else None
+        item=self.page_list.currentItem(); return item.text().split("Page ID: ",1)[-1].split(" — ",1)[0] if item and "Page ID: " in item.text() else None
     def sync_conversations(self):
         pid=self.conversation_page.text().strip(); token=self.conversation_token.text().strip()
         if not pid or not token: self.conversation_status.setText("Nhập Page ID và Page Token để đồng bộ."); return
@@ -117,7 +117,24 @@ class MainWindow(QMainWindow):
     def save_page(self):
         pid=self.selected_page_id()
         if not pid: QMessageBox.warning(self,"Chưa chọn Fanpage","Hãy chọn một Fanpage trước."); return
-        try: save_page_token(pid,self.page_token.text()); now=datetime.now(timezone.utc).isoformat(); self.database.update_page_token_metadata(pid,now,estimated_expiry(now),True,"Đã lưu - chưa kiểm tra") if self.database else None; self.sync_status.setText("Đã lưu Page Token an toàn")
+        try: save_page_token(pid,self.page_token.text()); now=datetime.now(timezone.utc).isoformat(); self.database.update_page_token_metadata(pid,now,None,False,"Đã lưu - chưa kiểm tra") if self.database else None; self.sync_status.setText("Đã lưu Page Token an toàn; thời hạn: chưa xác định")
+        except Exception as exc: self.sync_status.setText(str(exc))
+    def connect_page(self):
+        pid=self.selected_page_id()
+        if not pid: QMessageBox.warning(self,"Chưa chọn Fanpage","Hãy chọn một Fanpage trước."); return
+        existing=get_page_token(pid)
+        if existing:
+            try: PancakeApiClient(pid,existing).check_connection(); self.database.set_page_token_status(pid,"Đã kết nối") if self.database else None; self.sync_status.setText("Đã tái sử dụng Page Token hiện có"); return
+            except PancakeApiError: pass
+        if not self.token_input.text().strip(): QMessageBox.warning(self,"Thiếu User Token","Nhập User Access Token ở trang Tài khoản Pancake trước."); return
+        answer=QMessageBox.question(self,"Cấp Page Token mới","Pancake sẽ vô hiệu hóa Page Token cũ nếu có. Bạn có chắc muốn tiếp tục?",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer != QMessageBox.Yes: self.sync_status.setText("Đã hủy cấp Page Token"); return
+        try:
+            token=PancakeApiAdapter(self.token_input.text()).generate_page_access_token(pid)
+            PancakeApiClient(pid,token).check_connection(); save_page_token(pid,token)
+            if self.database: self.database.update_page_token_metadata(pid,datetime.now(timezone.utc).isoformat(),None,False,"Đã kết nối")
+            self.page_token.setText(token); self.sync_status.setText("Đã kết nối bằng Page Token mới; thời hạn: không tự hết hạn")
+        except PancakeApiError as exc: self.sync_status.setText(str(exc))
         except Exception as exc: self.sync_status.setText(str(exc))
     def delete_page(self):
         pid=self.selected_page_id()

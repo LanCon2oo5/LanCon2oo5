@@ -34,6 +34,38 @@ class PancakeApiAdapter:
         if isinstance(rows, dict): rows = rows.get("pages", [])
         if not isinstance(rows, list): raise PancakeApiError("Dữ liệu danh sách Fanpage không đúng định dạng.")
         return [PancakePage(str(row["id"]), str(row.get("name") or row.get("title") or row["id"]), row) for row in rows if isinstance(row, dict) and row.get("id") is not None]
+
+    def generate_page_access_token(self, page_id: str) -> str:
+        if not self.access_token:
+            raise PancakeApiError("Vui lòng nhập Public API Access Token.")
+        owns = self._client is None
+        client = self._client or httpx.Client(timeout=self.timeout)
+        try:
+            response = client.post(
+                f"{self.BASE_URL}/pages/{str(page_id).strip()}/generate_page_access_token",
+                params={"access_token": self.access_token},
+            )
+        except httpx.RequestError as exc:
+            raise PancakeApiError("Không thể kết nối Pancake. Hãy kiểm tra mạng và thử lại.") from exc
+        finally:
+            if owns:
+                client.close()
+        messages = {401: "Token không hợp lệ hoặc đã hết hạn (401).", 403: "Bạn không có quyền quản trị Fanpage này (403).", 429: "Pancake đang giới hạn số lần gọi API (429). Vui lòng thử lại sau."}
+        if response.status_code in messages:
+            raise PancakeApiError(messages[response.status_code], response.status_code)
+        if response.is_error:
+            raise PancakeApiError(f"Pancake trả về lỗi HTTP {response.status_code}.", response.status_code)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise PancakeApiError("Pancake trả về dữ liệu không hợp lệ.") from exc
+        token = payload.get("page_access_token") if isinstance(payload, dict) else None
+        if not token and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+            token = payload["data"].get("page_access_token")
+        if not isinstance(token, str) or not token.strip():
+            raise PancakeApiError("Pancake không trả về Page Access Token.")
+        return token.strip()
+
     def check_connection(self) -> bool: self.list_pages(); return True
 
 class PancakeApiClient:
