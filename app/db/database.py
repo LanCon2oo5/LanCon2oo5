@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from pathlib import Path
 
 class DatabaseError(RuntimeError):
@@ -26,6 +27,7 @@ class Database:
         CREATE TABLE IF NOT EXISTS pages (id TEXT PRIMARY KEY, name TEXT NOT NULL, account_id INTEGER, status TEXT NOT NULL DEFAULT 'Đã đồng bộ', synced_at TEXT, token_entered_at TEXT, token_expires_at TEXT, token_expiry_estimated INTEGER NOT NULL DEFAULT 1, token_status TEXT NOT NULL DEFAULT 'Chưa cấu hình');
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS activity_log (id INTEGER PRIMARY KEY, message TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS diagnostics_history (id INTEGER PRIMARY KEY, operation TEXT NOT NULL, page_id TEXT, created_at TEXT NOT NULL, http_status INTEGER, api_success INTEGER, error_code TEXT, error_message TEXT, json_type TEXT, top_level_fields TEXT, token_field_exists INTEGER, token_value_type TEXT, token_is_null INTEGER, token_is_empty INTEGER, token_present INTEGER);
             """)
             self.connection.commit()
         except sqlite3.Error as exc:
@@ -38,6 +40,34 @@ class Database:
         CREATE TABLE IF NOT EXISTS conversations_cache (page_id TEXT NOT NULL, conversation_id TEXT NOT NULL, customer_name TEXT, last_message TEXT, updated_at TEXT, status TEXT, synced_at TEXT NOT NULL, PRIMARY KEY(page_id, conversation_id));
         CREATE TABLE IF NOT EXISTS message_cache (page_id TEXT NOT NULL, conversation_id TEXT NOT NULL, message_id TEXT NOT NULL, sender_type TEXT, content TEXT, sent_at TEXT, synced_at TEXT NOT NULL, PRIMARY KEY(page_id, conversation_id, message_id));
         """); self.connection.commit()
+
+    def record_diagnostic(self, operation, page_id, diagnostics, created_at=None):
+        """Persist only the safe, structured subset of an API diagnostic."""
+        from datetime import datetime, timezone
+        created_at = created_at or datetime.now(timezone.utc).isoformat()
+        fields = json.dumps(list(getattr(diagnostics, "top_level_fields", ()) or ()), ensure_ascii=False)
+        self.connection.execute("""INSERT INTO diagnostics_history
+            (operation,page_id,created_at,http_status,api_success,error_code,error_message,json_type,top_level_fields,token_field_exists,token_value_type,token_is_null,token_is_empty,token_present)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            str(operation), str(page_id) if page_id is not None else None, created_at,
+            getattr(diagnostics, "http_status", None),
+            None if getattr(diagnostics, "success", None) is None else int(bool(diagnostics.success)),
+            str(getattr(diagnostics, "error_code", "") or ""), str(getattr(diagnostics, "error_message", "") or "")[:300],
+            str(getattr(diagnostics, "json_type", "") or ""), fields,
+            int(bool(getattr(diagnostics, "token_field_exists", False))), str(getattr(diagnostics, "token_value_type", "") or ""),
+            int(bool(getattr(diagnostics, "token_is_null", False))), int(bool(getattr(diagnostics, "token_is_empty", False))), int(bool(getattr(diagnostics, "token_present", False)))))
+        self.connection.execute("DELETE FROM diagnostics_history WHERE id NOT IN (SELECT id FROM diagnostics_history ORDER BY id DESC LIMIT 50)")
+        self.connection.commit()
+
+    def list_diagnostics(self, operation=None, page_id=None):
+        query = "SELECT * FROM diagnostics_history WHERE 1=1"; args = []
+        if operation: query += " AND operation=?"; args.append(operation)
+        if page_id: query += " AND page_id=?"; args.append(str(page_id))
+        query += " ORDER BY id DESC"
+        return self.connection.execute(query, args).fetchall()
+
+    def clear_diagnostics(self):
+        self.connection.execute("DELETE FROM diagnostics_history"); self.connection.commit()
 
     def replace_pages(self, pages: list[tuple[str, str]], synced_at: str) -> None:
         ids={pid for pid, _ in pages}; existing={row[0] for row in self.connection.execute("SELECT id FROM pages")}

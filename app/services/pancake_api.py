@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import time
 import re
+from datetime import datetime, timezone
 from typing import Any
 import httpx
 
@@ -39,6 +40,10 @@ class PageListDiagnostics:
     activated_item_keys: tuple[str, ...] = ()
     activated_field_types: tuple[str, ...] = ()
     skipped_count: int = 0
+    request_time: str = ""
+    def __post_init__(self):
+        if not self.request_time:
+            object.__setattr__(self, "request_time", datetime.now(timezone.utc).isoformat())
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,10 @@ class TokenGenerationDiagnostics:
     token_is_null: bool = False
     token_is_empty: bool = False
     request_state: str = "unknown"
+    request_time: str = ""
+    def __post_init__(self):
+        if not self.request_time:
+            object.__setattr__(self, "request_time", datetime.now(timezone.utc).isoformat())
 
 class PancakeApiAdapter:
     BASE_URL = "https://pages.fm/api/v1"
