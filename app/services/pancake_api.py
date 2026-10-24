@@ -13,6 +13,9 @@ class PancakePage:
     page_id: str
     name: str
     raw: dict[str, Any]
+    platform: str = ""
+    role_in_page: str = ""
+    is_activated: bool = False
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,7 @@ class PageListDiagnostics:
     activated_item_type: str = "absent"
     activated_item_keys: tuple[str, ...] = ()
     activated_field_types: tuple[str, ...] = ()
+    skipped_count: int = 0
 
 class PancakeApiAdapter:
     BASE_URL = "https://pages.fm/api/v1"
@@ -68,6 +72,29 @@ class PancakeApiAdapter:
 
     def _parse_pages(self, payload: Any, http_status: int = 200) -> list[PancakePage]:
         top_fields = tuple(sorted(payload.keys())) if isinstance(payload, dict) else ()
+        if isinstance(payload, dict) and "categorized" in payload:
+            categorized = payload["categorized"]
+            activated = categorized.get("activated") if isinstance(categorized, dict) else None
+            if not isinstance(activated, list):
+                raise PancakeApiError("categorized.activated không phải là list.", http_status, self.last_page_diagnostics)
+            pages = []
+            seen = set()
+            skipped = 0
+            for row in activated:
+                if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"].strip() or not isinstance(row.get("name"), str) or not row["name"].strip():
+                    skipped += 1
+                    continue
+                page_id = row["id"].strip()
+                if page_id in seen:
+                    skipped += 1
+                    continue
+                seen.add(page_id)
+                pages.append(PancakePage(page_id, row["name"].strip(), row, str(row.get("platform") or ""), str(row.get("role_in_page") or ""), bool(row.get("is_activated", True))))
+            old = self.last_page_diagnostics
+            self.last_page_diagnostics = PageListDiagnostics(http_status, True, type(payload).__name__, top_fields, len(pages), old.content_type if old else "", old.json_type if old else type(payload).__name__, old.success if old else None, old.error_code if old else None, old.error_message if old else "", "categorized.activated", old.categorized_type if old else "dict", old.categorized_keys if old else (), old.categorized_summary if old else (), old.collection_candidates if old else (), old.activated_item_type if old else "dict", old.activated_item_keys if old else (), old.activated_field_types if old else (), skipped)
+            if not pages and activated:
+                raise PancakeApiError(f"Không có Fanpage hợp lệ trong categorized.activated; bỏ qua {skipped} phần tử.", http_status, self.last_page_diagnostics)
+            return pages
         if isinstance(payload, dict) and not any(key in payload for key in ("data", "pages", "items", "results")):
             raise PancakeApiError("Dữ liệu danh sách Fanpage thiếu trường danh sách.", http_status, self.last_page_diagnostics)
         rows = payload.get("data", payload) if isinstance(payload, dict) else payload
@@ -84,7 +111,7 @@ class PancakeApiAdapter:
                 continue
             pages.append(PancakePage(str(page_id), str(row.get("name") or row.get("title") or page_id), row))
         old = self.last_page_diagnostics
-        self.last_page_diagnostics = PageListDiagnostics(http_status, True, type(payload).__name__, top_fields, len(pages), old.content_type if old else "", old.json_type if old else type(payload).__name__, old.success if old else None, old.error_code if old else None, old.error_message if old else "", "data" if isinstance(payload, dict) and "data" in payload else "top-level", old.categorized_type if old else "absent", old.categorized_keys if old else (), old.categorized_summary if old else (), old.collection_candidates if old else ())
+        self.last_page_diagnostics = PageListDiagnostics(http_status, True, type(payload).__name__, top_fields, len(pages), old.content_type if old else "", old.json_type if old else type(payload).__name__, old.success if old else None, old.error_code if old else None, old.error_message if old else "", "data" if isinstance(payload, dict) and "data" in payload else "top-level", old.categorized_type if old else "absent", old.categorized_keys if old else (), old.categorized_summary if old else (), old.collection_candidates if old else (), old.activated_item_type if old else "absent", old.activated_item_keys if old else (), old.activated_field_types if old else (), 0)
         return pages
 
     def _with_categorized_diagnostics(self, diagnostics, payload):

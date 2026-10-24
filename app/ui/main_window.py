@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
             f"API Success: {success}{error}",
             f"List Location: {diagnostics.list_location}",
             f"Parsed Pages: {diagnostics.parsed_count}",
+            f"Skipped Invalid/Duplicate: {diagnostics.skipped_count}",
             f"SQLite Pages: {sqlite_count if sqlite_count is not None else '-'}",
             f"UI Pages: {ui_count if ui_count is not None else '-'}",
             f"categorized type: {diagnostics.categorized_type}",
