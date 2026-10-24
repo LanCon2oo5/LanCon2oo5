@@ -13,10 +13,19 @@ class PancakePage:
     name: str
     raw: dict[str, Any]
 
+
+@dataclass(frozen=True)
+class PageListDiagnostics:
+    http_status: int
+    api_success: bool
+    response_type: str
+    top_level_fields: tuple[str, ...]
+    parsed_count: int
+
 class PancakeApiAdapter:
     BASE_URL = "https://pages.fm/api/v1"
     def __init__(self, access_token: str, timeout: float = 15.0, client: httpx.Client | None = None):
-        self.access_token = access_token.strip(); self.timeout = timeout; self._client = client
+        self.access_token = access_token.strip(); self.timeout = timeout; self._client = client; self.last_page_diagnostics = None
     def _request(self, path: str) -> Any:
         if not self.access_token: raise PancakeApiError("Vui lòng nhập Public API Access Token.")
         owns = self._client is None; client = self._client or httpx.Client(timeout=self.timeout)
@@ -30,10 +39,32 @@ class PancakeApiAdapter:
         try: return response.json()
         except ValueError as exc: raise PancakeApiError("Pancake trả về dữ liệu không hợp lệ.") from exc
     def list_pages(self) -> list[PancakePage]:
-        payload = self._request("/pages"); rows = payload.get("data", payload) if isinstance(payload, dict) else payload
-        if isinstance(rows, dict): rows = rows.get("pages", [])
-        if not isinstance(rows, list): raise PancakeApiError("Dữ liệu danh sách Fanpage không đúng định dạng.")
-        return [PancakePage(str(row["id"]), str(row.get("name") or row.get("title") or row["id"]), row) for row in rows if isinstance(row, dict) and row.get("id") is not None]
+        payload = self._request("/pages")
+        return self._parse_pages(payload, http_status=200)
+
+    def _parse_pages(self, payload: Any, http_status: int = 200) -> list[PancakePage]:
+        top_fields = tuple(sorted(payload.keys())) if isinstance(payload, dict) else ()
+        if isinstance(payload, dict) and not any(key in payload for key in ("data", "pages", "items", "results")):
+            raise PancakeApiError("Dữ liệu danh sách Fanpage thiếu trường danh sách (data/pages/items/results).")
+        rows = payload.get("data", payload) if isinstance(payload, dict) else payload
+        if isinstance(rows, dict):
+            rows = rows.get("pages", rows.get("items", rows.get("results", [])))
+        if not isinstance(rows, list):
+            raise PancakeApiError("Dữ liệu danh sách Fanpage không đúng định dạng.")
+        pages = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            page_id = row.get("id", row.get("page_id"))
+            if page_id is None:
+                continue
+            pages.append(PancakePage(str(page_id), str(row.get("name") or row.get("title") or page_id), row))
+        self.last_page_diagnostics = PageListDiagnostics(http_status, True, type(payload).__name__, top_fields, len(pages))
+        return pages
+
+    def list_pages_with_diagnostics(self) -> tuple[list[PancakePage], PageListDiagnostics]:
+        pages = self.list_pages()
+        return pages, self.last_page_diagnostics
 
     def generate_page_access_token(self, page_id: str) -> str:
         if not self.access_token:
