@@ -52,6 +52,10 @@ class TokenGenerationDiagnostics:
     error_message: str = ""
     token_field_location: str = "not found"
     token_present: bool = False
+    token_field_exists: bool = False
+    token_value_type: str = "missing"
+    token_is_null: bool = False
+    token_is_empty: bool = False
     request_state: str = "unknown"
 
 class PancakeApiAdapter:
@@ -178,14 +182,28 @@ class PancakeApiAdapter:
         success = payload.get("success") if isinstance(payload, dict) else None
         err = payload.get("error") if isinstance(payload, dict) else None
         error_code = err.get("code") if isinstance(err, dict) else None
-        error_message = str(err.get("message", "") if isinstance(err, dict) else (err or ""))
-        error_message = re.sub(r"https?://\S+|access_token=[^&\s]+|page_access_token=[^&\s]+", "[redacted]", error_message)[:300]
+        message = payload.get("message") if isinstance(payload, dict) else None
+        raw_message = message if message is not None else (err.get("message", "") if isinstance(err, dict) else (err or ""))
+        if isinstance(raw_message, str):
+            error_message = re.sub(r"https?://\S+|access_token=[^&\s]+|page_access_token=[^&\s]+", "[redacted]", raw_message)[:300]
+        elif isinstance(raw_message, dict):
+            error_message = "message object; fields: " + ", ".join(sorted(str(k) for k in raw_message.keys()))
+        elif isinstance(raw_message, list):
+            error_message = f"message list; items: {len(raw_message)}"
+        else:
+            error_message = f"message type: {type(raw_message).__name__}" if raw_message is not None else ""
         token = None; location = "not found"
-        if isinstance(payload, dict) and isinstance(payload.get("page_access_token"), str):
-            token = payload["page_access_token"]; location = "top-level.page_access_token"
-        elif isinstance(payload, dict) and isinstance(payload.get("data"), dict) and isinstance(payload["data"].get("page_access_token"), str):
-            token = payload["data"]["page_access_token"]; location = "data.page_access_token"
-        self.last_token_generation_diagnostics = TokenGenerationDiagnostics(response.status_code, response.headers.get("content-type", ""), type(payload).__name__, top, success, error_code, error_message, location, bool(token and token.strip()), "HTTP response received")
+        token_field_exists = isinstance(payload, dict) and "page_access_token" in payload
+        token_value = payload.get("page_access_token") if token_field_exists else None
+        if token_field_exists:
+            location = "top-level.page_access_token"
+        elif isinstance(payload, dict) and isinstance(payload.get("data"), dict) and "page_access_token" in payload["data"]:
+            location = "data.page_access_token"; token_field_exists = True; token_value = payload["data"]["page_access_token"]
+        token_type = type(token_value).__name__ if token_field_exists else "missing"
+        token_is_null = token_field_exists and token_value is None
+        token_is_empty = token_field_exists and isinstance(token_value, str) and not token_value.strip()
+        if isinstance(token_value, str): token = token_value
+        self.last_token_generation_diagnostics = TokenGenerationDiagnostics(response.status_code, response.headers.get("content-type", ""), type(payload).__name__, top, success, error_code, error_message, location, bool(token and token.strip()), token_field_exists, token_type, token_is_null, token_is_empty, "HTTP response received")
         messages = {401: "Token không hợp lệ hoặc đã hết hạn (401).", 403: "Bạn không có quyền quản trị Fanpage này (403).", 429: "Pancake đang giới hạn số lần gọi API (429). Vui lòng thử lại sau."}
         if response.status_code in messages:
             raise PancakeApiError(messages[response.status_code], response.status_code, self.last_token_generation_diagnostics)
