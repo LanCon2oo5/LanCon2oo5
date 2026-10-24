@@ -11,4 +11,6 @@ release/
 runtime-data/
 .test-tmp/
 token*
+!app/services/token_store.py
+!app/services/token_metadata.py
 *secret*
