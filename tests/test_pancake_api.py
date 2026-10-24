@@ -23,6 +23,18 @@ def test_list_pages_rejects_unexpected_response_shape():
     with pytest.raises(PancakeApiError):
         PancakeApiAdapter("secret", client=client).list_pages()
 
+def test_diagnostics_survive_parser_failure_and_redact_token():
+    payload = {"success": False, "error": {"code": "AUTH", "message": "bad access_token=top-secret"}}
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(403, json=payload, headers={"content-type": "application/json"})))
+    with pytest.raises(PancakeApiError) as caught:
+        PancakeApiAdapter("top-secret", client=client).list_pages()
+    error = caught.value
+    assert error.status_code == 403
+    assert error.diagnostics.content_type == "application/json"
+    assert error.diagnostics.top_level_fields == ("error", "success")
+    assert error.diagnostics.success is False
+    assert "top-secret" not in error.diagnostics.error_message
+
 @pytest.mark.parametrize("status", [401, 403, 429])
 def test_api_errors_are_translated(status):
     client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(status)))

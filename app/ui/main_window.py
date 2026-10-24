@@ -92,13 +92,21 @@ class MainWindow(QMainWindow):
     def _set_page_actions_enabled(self, enabled):
         for button in (self.page_connect,self.page_save,self.page_delete,self.page_check): button.setEnabled(enabled)
     def worker_done(self, result, error):
-        if error: self.account_status.setText(error); self.sync_status.setText(error); return
+        if error:
+            message=str(error); self.account_status.setText(message); self.sync_status.setText(message)
+            diagnostics=getattr(error,"diagnostics",None)
+            if diagnostics: self.page_diagnostics.setText(self._diagnostic_text(diagnostics))
+            return
         if isinstance(result,list):
             self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in result]; now=datetime.now(timezone.utc).isoformat(); self.sync_status.setText(f"Đã đồng bộ {len(result)} Fanpage lúc {now}");
             if self.database: self.database.replace_pages([(p.page_id,p.name) for p in result],now)
         elif isinstance(result, tuple) and len(result) == 2:
-            pages, diagnostics = result; self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in pages]; now=datetime.now(timezone.utc).isoformat(); self.page_count.setText(f"Fanpage: {len(pages)}"); self.page_diagnostics.setText(f"HTTP {diagnostics.http_status} • API thành công • response {diagnostics.response_type} • fields: {', '.join(diagnostics.top_level_fields) or '(không có)'} • parse: {diagnostics.parsed_count} • UI: {len(pages)} • lúc {now}"); self.sync_status.setText(f"Đã đồng bộ {len(pages)} Fanpage"); self._set_page_actions_enabled(False); self.database.replace_pages([(p.page_id,p.name) for p in pages],now) if self.database else None
+            pages, diagnostics = result; self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in pages]; now=datetime.now(timezone.utc).isoformat(); self.page_count.setText(f"Fanpage: {len(pages)}"); self.page_diagnostics.setText(self._diagnostic_text(diagnostics)); self.sync_status.setText(f"Đã đồng bộ {len(pages)} Fanpage"); self._set_page_actions_enabled(False); self.database.replace_pages([(p.page_id,p.name) for p in pages],now) if self.database else None
         else: self.account_status.setText("Kết nối thành công")
+    def _diagnostic_text(self, diagnostics):
+        success = "chưa có" if diagnostics.success is None else str(diagnostics.success)
+        error = f" • error: {diagnostics.error_code or '-'} {diagnostics.error_message}" if diagnostics.error_code or diagnostics.error_message else ""
+        return f"Chẩn đoán API: HTTP {diagnostics.http_status} • Content-Type: {diagnostics.content_type or '-'} • JSON: {diagnostics.json_type} • fields: {', '.join(diagnostics.top_level_fields) or '(không có)'} • success: {success} • danh sách: {diagnostics.list_location} • parse: {diagnostics.parsed_count} • UI: {diagnostics.parsed_count}{error}"
     def selected_page_id(self):
         item=self.page_list.currentItem(); return item.text().split("Page ID: ",1)[-1].split(" — ",1)[0] if item and "Page ID: " in item.text() else None
     def sync_conversations(self):
