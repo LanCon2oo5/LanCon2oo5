@@ -15,7 +15,7 @@ class ApiWorker(QThread):
     def run(self):
         try:
             api=PancakeApiAdapter(self.token); self.done.emit(api.list_pages_with_diagnostics() if self.pages else api.check_connection(), None)
-        except PancakeApiError as exc: self.done.emit(None, str(exc))
+        except PancakeApiError as exc: self.done.emit(None, exc)
 
 class ConversationWorker(QThread):
     done=Signal(object,object)
@@ -88,25 +88,30 @@ class MainWindow(QMainWindow):
         if not token: QMessageBox.warning(self,"Thiếu token","Vui lòng nhập Public API Access Token."); return
         self.worker=ApiWorker(token,pages); self.worker.done.connect(self.worker_done); self.worker.start()
     def check_connection(self): self.account_status.setText("Đang kiểm tra..."); self.run_worker()
-    def refresh_pages(self): self.sync_status.setText("Đang đồng bộ..."); self.run_worker(True)
+    def refresh_pages(self): self.sync_status.setText("Đang gọi API..."); self.page_diagnostics.setText("Chẩn đoán API: đang thực hiện request GET /pages..."); self.run_worker(True)
     def _set_page_actions_enabled(self, enabled):
         for button in (self.page_connect,self.page_save,self.page_delete,self.page_check): button.setEnabled(enabled)
     def worker_done(self, result, error):
         if error:
             message=str(error); self.account_status.setText(message); self.sync_status.setText(message)
             diagnostics=getattr(error,"diagnostics",None)
-            if diagnostics: self.page_diagnostics.setText(self._diagnostic_text(diagnostics))
+            if diagnostics: self.page_diagnostics.setText(self._diagnostic_text(diagnostics, sqlite_count=None, ui_count=self.page_list.count(), parser_error=message))
+            else: self.page_diagnostics.setText(f"Chẩn đoán API: request thất bại trước HTTP response • {message}")
             return
         if isinstance(result,list):
             self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in result]; now=datetime.now(timezone.utc).isoformat(); self.sync_status.setText(f"Đã đồng bộ {len(result)} Fanpage lúc {now}");
             if self.database: self.database.replace_pages([(p.page_id,p.name) for p in result],now)
         elif isinstance(result, tuple) and len(result) == 2:
-            pages, diagnostics = result; self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in pages]; now=datetime.now(timezone.utc).isoformat(); self.page_count.setText(f"Fanpage: {len(pages)}"); self.page_diagnostics.setText(self._diagnostic_text(diagnostics)); self.sync_status.setText(f"Đã đồng bộ {len(pages)} Fanpage"); self._set_page_actions_enabled(False); self.database.replace_pages([(p.page_id,p.name) for p in pages],now) if self.database else None
+            pages, diagnostics = result; self.page_list.clear(); [self.page_list.addItem(f"{p.name} — Page ID: {p.page_id} — Chưa kết nối") for p in pages]; now=datetime.now(timezone.utc).isoformat(); self.page_count.setText(f"Fanpage: {len(pages)}"); sqlite_count=None
+            if self.database:
+                self.database.replace_pages([(p.page_id,p.name) for p in pages],now); sqlite_count=self.database.connection.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+            self.page_diagnostics.setText(self._diagnostic_text(diagnostics, sqlite_count, len(pages))); self.sync_status.setText(f"Đã đồng bộ {len(pages)} Fanpage"); self._set_page_actions_enabled(False)
         else: self.account_status.setText("Kết nối thành công")
-    def _diagnostic_text(self, diagnostics):
+    def _diagnostic_text(self, diagnostics, sqlite_count=None, ui_count=None, parser_error=None):
         success = "chưa có" if diagnostics.success is None else str(diagnostics.success)
         error = f" • error: {diagnostics.error_code or '-'} {diagnostics.error_message}" if diagnostics.error_code or diagnostics.error_message else ""
-        return f"Chẩn đoán API: HTTP {diagnostics.http_status} • Content-Type: {diagnostics.content_type or '-'} • JSON: {diagnostics.json_type} • fields: {', '.join(diagnostics.top_level_fields) or '(không có)'} • success: {success} • danh sách: {diagnostics.list_location} • parse: {diagnostics.parsed_count} • UI: {diagnostics.parsed_count}{error}"
+        parser = f" • parser: {parser_error}" if parser_error else ""
+        return f"Chẩn đoán API: HTTP {diagnostics.http_status} • Content-Type: {diagnostics.content_type or '-'} • JSON: {diagnostics.json_type} • fields: {', '.join(diagnostics.top_level_fields) or '(không có)'} • success: {success} • danh sách: {diagnostics.list_location} • parsed: {diagnostics.parsed_count} • SQLite: {sqlite_count if sqlite_count is not None else '-'} • UI: {ui_count if ui_count is not None else '-'}{error}{parser}"
     def selected_page_id(self):
         item=self.page_list.currentItem(); return item.text().split("Page ID: ",1)[-1].split(" — ",1)[0] if item and "Page ID: " in item.text() else None
     def sync_conversations(self):
