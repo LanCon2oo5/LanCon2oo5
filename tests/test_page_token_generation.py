@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.services.pancake_api import PancakeApiAdapter, PancakeApiError
+from app.services.pancake_api import PancakeApiAdapter, PancakeApiClient, PancakeApiError
 
 
 def test_generate_page_token_uses_post_and_user_token():
@@ -73,3 +73,22 @@ def test_generate_page_token_timeout_does_not_retry():
     assert len(calls) == 1
     assert caught.value.diagnostics.http_status is None
     assert "không tạo lại token" in str(caught.value)
+
+
+def test_page_token_connection_rejects_business_failure_on_http_200():
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(
+        200, json={"success": False, "message": "page_access_token=hidden"}
+    )))
+    page_client = PancakeApiClient("42", "page-secret", client=client)
+    with pytest.raises(PancakeApiError) as caught:
+        page_client.check_connection()
+    assert caught.value.status_code == 200
+    assert "hidden" not in str(caught.value)
+    assert "page_access_token" not in str(caught.value)
+
+
+def test_generate_page_token_curl_uses_placeholder_and_current_post_shape():
+    curl = PancakeApiAdapter.generate_page_token_curl("42")
+    assert curl == 'curl -X POST "https://pages.fm/api/v1/pages/42/generate_page_access_token?access_token=YOUR_USER_ACCESS_TOKEN" -H "Accept: application/json"'
+    assert "user-secret" not in curl
+    assert "page-secret" not in curl

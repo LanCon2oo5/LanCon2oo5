@@ -25,6 +25,15 @@ def test_page_refresh_updates_ui_and_database(tmp_path, monkeypatch):
     db.close()
 
 
+def test_stored_user_token_is_loaded_without_marking_connection_verified(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr("app.ui.main_window.keyring.get_password", lambda service, user: "stored-user-token")
+    app, db, window = create_app()
+    assert window.token_input.text() == "stored-user-token"
+    assert "chưa kiểm tra" in window.account_status.text().lower()
+    db.close()
+
+
 def test_parser_error_diagnostics_reach_fanpage_ui(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     app, db, window = create_app()

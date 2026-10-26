@@ -66,6 +66,13 @@ def test_categorized_activated_parses_seven_pages_without_counting_ids():
     assert diagnostics.list_location == "categorized.activated"
     assert diagnostics.skipped_count == 0
 
+
+def test_categorized_activated_preserves_role_in_page():
+    payload = {"success": True, "categorized": {"activated": [{"id": "42", "name": "Shop", "role_in_page": "admin"}]}}
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload)))
+    pages = PancakeApiAdapter("secret", client=client).list_pages()
+    assert pages[0].role_in_page == "admin"
+
 def test_categorized_activated_skips_invalid_and_duplicate_ids():
     activated = [{"id": "1", "name": "One"}, {"id": "1", "name": "Duplicate"}, {"id": "2"}, {"id": "3", "name": "Three"}]
     payload = {"success": True, "categorized": {"activated": activated}}

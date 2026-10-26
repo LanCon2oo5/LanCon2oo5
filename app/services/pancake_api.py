@@ -222,6 +222,15 @@ class PancakeApiAdapter:
             raise PancakeApiError("Pancake không trả về Page Access Token; không tạo lại token.", response.status_code, self.last_token_generation_diagnostics)
         return token.strip()
 
+    @classmethod
+    def generate_page_token_curl(cls, page_id: str) -> str:
+        """Build a safe support command; never embeds the configured user token."""
+        page = str(page_id).strip()
+        if not page:
+            raise ValueError("Page ID không được để trống.")
+        url = f'{cls.BASE_URL}/pages/{page}/generate_page_access_token?access_token=YOUR_USER_ACCESS_TOKEN'
+        return f'curl -X POST "{url}" -H "Accept: application/json"'
+
     def check_connection(self) -> bool: self.list_pages(); return True
 
 class PancakeApiClient:
@@ -242,7 +251,17 @@ class PancakeApiClient:
         if response.is_error: raise PancakeApiError(f"Pancake trả về lỗi HTTP {response.status_code}.", response.status_code)
         try: return response.json()
         except ValueError as exc: raise PancakeApiError("Pancake trả về dữ liệu không hợp lệ.") from exc
-    def check_connection(self): self.request("conversations", {"page_size": 1}); return True
+    def check_connection(self):
+        payload = self.request("conversations", {"page_size": 1})
+        if isinstance(payload, dict) and payload.get("success") is False:
+            message = payload.get("message") or payload.get("error")
+            if isinstance(message, dict):
+                message = message.get("message") or "Pancake từ chối yêu cầu."
+            if not isinstance(message, str) or not message.strip():
+                message = "Pancake từ chối yêu cầu."
+            message = re.sub(r"https?://\S+|access_token=[^&\s]+|page_access_token=[^&\s]+", "[redacted]", message)[:300]
+            raise PancakeApiError(message, 200)
+        return True
     def list_conversations(self, last_conversation_id=None):
         params={"page_size":60}
         if last_conversation_id: params["last_conversation_id"]=last_conversation_id
